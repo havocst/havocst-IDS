@@ -1,7 +1,4 @@
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
-[![Crates.io](https://img.shields.io/crates/v/your-crate-name.svg)](https://crates.io/crates/your-crate-name)
-![Build](https://github.com/havocst/rust-IDS/actions/workflows/ci.yml/badge.svg)
-
 
 # rust-IDS 🛡️
 
