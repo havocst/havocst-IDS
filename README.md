@@ -23,28 +23,6 @@ Clone the repo and build in release mode for better performance:
 git clone https://github.com/havocst/rust-IDS.git
 cd rust-IDS
 cargo build --release
-=======
-# rust-IDS 🕵️‍♂️🛡️
-
-A lightweight Intrusion Detection System (IDS) written in Rust to monitor network traffic and alert on suspicious activity.
-
----
-
-## Features 🚀
-
-* Real-time network traffic monitoring
-* Configurable threshold and window for port scan detection
-* Logs alerts to a specified file
-* Written in safe, fast Rust
-
----
-
-## Usage 💻
-
-Build the project in release mode for better performance:
-
-```bash
-cargo build --release
 ```
 
 Grant the binary the necessary network permissions (so you don't need to run it as root):
