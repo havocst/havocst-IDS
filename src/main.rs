@@ -1,0 +1,153 @@
+use clap::Parser;
+use chrono::Utc;
+use pnet::datalink::{self, Channel::Ethernet, NetworkInterface};
+use pnet::packet::tcp::TcpPacket;
+use pnet::packet::Packet;
+use std::collections::{HashMap, HashSet};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::net::Ipv4Addr;
+use std::time::{Duration, Instant};
+
+/// Simple Rust IDS to detect TCP port scans.
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Network interface to listen on (e.g., eth0)
+    #[arg(short, long, default_value = "eth0")]
+    iface: String,
+
+    /// Number of unique ports scanned within window to trigger alert
+    #[arg(short, long, default_value_t = 20)]
+    threshold: usize,
+
+    /// Time window in seconds to count unique ports
+    #[arg(short, long, default_value_t = 60)]
+    window: u64,
+
+    /// Optional file path to log alerts
+    #[arg(short, long)]
+    log_file: Option<String>,
+}
+
+struct IpActivity {
+    ports: HashSet<u16>,
+    first_seen: Instant,
+}
+
+fn log_alert(log_file: &Option<String>, alert: &str) {
+    if let Some(path) = log_file {
+        match OpenOptions::new().append(true).create(true).open(path) {
+            Ok(mut file) => {
+                if let Err(e) = writeln!(file, "{}", alert) {
+                    eprintln!("Failed to write to log file: {}", e);
+                }
+            }
+            Err(e) => eprintln!("Failed to open log file '{}': {}", path, e),
+        }
+    }
+}
+
+fn main() {
+    let args = Args::parse();
+
+    // Find the network interface
+    let interfaces = datalink::interfaces();
+    let interface = interfaces.into_iter()
+        .find(|iface| iface.name == args.iface)
+        .unwrap_or_else(|| {
+            eprintln!("Network interface '{}' not found", args.iface);
+            std::process::exit(1);
+        });
+
+    println!(
+        "[{}] Starting rust-IDS on interface '{}' with threshold={} ports, window={}s",
+        Utc::now().format("%Y-%m-%d %H:%M:%S"),
+        args.iface,
+        args.threshold,
+        args.window
+    );
+
+    // Create datalink channel
+    let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
+        Ok(Ethernet(_tx, rx)) => (_tx, rx),
+        Ok(_) => {
+            eprintln!("Unhandled channel type");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Failed to create datalink channel: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut ip_map: HashMap<Ipv4Addr, IpActivity> = HashMap::new();
+    let window_duration = Duration::from_secs(args.window);
+    let mut last_heartbeat = Instant::now();
+
+    loop {
+        match rx.next() {
+            Ok(packet) => {
+                if let Some(tcp_packet) = TcpPacket::new(&packet[34..]) { // Skip Ethernet+IP header (approx)
+                    if let Some(source_ip) = extract_ipv4_source(&packet) {
+                        let now = Instant::now();
+
+                        // Remove expired entries
+                        ip_map.retain(|_, activity| now.duration_since(activity.first_seen) <= window_duration);
+
+                        // Update or insert IP activity
+                        let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
+                            ports: HashSet::new(),
+                            first_seen: now,
+                        });
+                        activity.ports.insert(tcp_packet.get_destination());
+
+                        // Check threshold
+                        if activity.ports.len() >= args.threshold {
+                            let alert_msg = format!(
+                                "[{}] ⚠️  Potential port scan from {}: {} ports in {}s",
+                                Utc::now().format("%Y-%m-%d %H:%M:%S"),
+                                source_ip,
+                                activity.ports.len(),
+                                args.window
+                            );
+                            println!("{}", alert_msg);
+                            log_alert(&args.log_file, &alert_msg);
+                            // Reset to avoid spam alerts for same IP
+                            ip_map.remove(&source_ip);
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("Failed to read packet: {}", e),
+        }
+
+        // Heartbeat every 30 seconds
+        if last_heartbeat.elapsed() >= Duration::from_secs(30) {
+            println!(
+                "[{}] ✅ IDS still running...",
+                Utc::now().format("%Y-%m-%d %H:%M:%S")
+            );
+            last_heartbeat = Instant::now();
+        }
+    }
+}
+
+/// Extract IPv4 source address from raw Ethernet frame packet
+fn extract_ipv4_source(packet: &[u8]) -> Option<Ipv4Addr> {
+    // Ethernet header: 14 bytes
+    // IPv4 header: typically 20 bytes, version 4
+    if packet.len() >= 34 {
+        // IPv4 header starts at offset 14
+        let ip_header = &packet[14..34];
+        if ip_header[0] >> 4 == 4 {
+            let src_ip = Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]);
+            Some(src_ip)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
