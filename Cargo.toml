@@ -6,6 +6,10 @@ authors = ["Your Name <you@example.com>"]
 description = "A lightweight, CLI-based Intrusion Detection System (IDS) written in Rust for monitoring and detecting potential port scan attacks."
 license = "MIT"
 repository = "https://github.com/havocst/havocst-IDS"
+homepage = "https://github.com/havocst/havocst-IDS"
+keywords = ["rust", "ids", "security", "network", "portscan", "IDS", "port", "scan" , "detector" ]
+categories = ["command-line-utilities", "network-programming", "security"]
+
 
 [dependencies]
 pnet = "0.33"
