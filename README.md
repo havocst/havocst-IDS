@@ -1,9 +1,5 @@
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-# Rust-IDS
-An intrusion detection system written in Rust...
-
-
 # rust-IDS 🛡️
 
 A simple network intrusion detection system (IDS) written in Rust that monitors unusual port scanning behavior on a specified network interface.
