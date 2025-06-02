@@ -1,0 +1,13 @@
+[package]
+name = "havocst-IDS"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <you@example.com>"]
+description = "A lightweight, CLI-based Intrusion Detection System (IDS) written in Rust for monitoring and detecting potential port scan attacks."
+license = "MIT"
+repository = "https://github.com/havocst/havocst-IDS"
+
+[dependencies]
+pnet = "0.33"
+clap = { version = "4.5", features = ["derive"] }
+chrono = "0.4"
