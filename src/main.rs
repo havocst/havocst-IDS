@@ -1,6 +1,9 @@
 use clap::Parser;
 use chrono::Utc;
 use pnet::datalink::{self, Channel::Ethernet};
+use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use std::collections::{HashMap, HashSet};
@@ -48,27 +51,12 @@ fn log_alert(log_file: &Option<String>, alert: &str) {
     }
 }
 
-/// Extract IPv4 source address from raw Ethernet frame packet
-fn extract_ipv4_source(packet: &[u8]) -> Option<Ipv4Addr> {
-    // Check that packet has enough length to safely slice
-    if packet.len() >= 34 {
-        let ip_header = &packet[14..34];
-        if ip_header.len() == 20 && (ip_header[0] >> 4) == 4 {
-            Some(Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]))
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
 fn main() {
     let args = Args::parse();
 
-    // Find the network interface
     let interfaces = datalink::interfaces();
-    let interface = interfaces.into_iter()
+    let interface = interfaces
+        .into_iter()
         .find(|iface| iface.name == args.iface)
         .unwrap_or_else(|| {
             eprintln!("Network interface '{}' not found", args.iface);
@@ -83,7 +71,6 @@ fn main() {
         args.window
     );
 
-    // Create datalink channel
     let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
         Ok(Ethernet(_tx, rx)) => (_tx, rx),
         Ok(_) => {
@@ -102,38 +89,40 @@ fn main() {
 
     loop {
         match rx.next() {
-            Ok(packet) => {
-                if packet.len() < 34 {
-                    eprintln!("⚠️  Skipped short packet: only {} bytes", packet.len());
-                    continue;
-                }
+            Ok(packet_data) => {
+                if let Some(ethernet) = EthernetPacket::new(packet_data) {
+                    if ethernet.get_ethertype() == pnet::packet::ethernet::EtherTypes::Ipv4 {
+                        if let Some(ipv4) = Ipv4Packet::new(ethernet.payload()) {
+                            if ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
+                                if let Some(tcp) = TcpPacket::new(ipv4.payload()) {
+                                    let source_ip = ipv4.get_source();
+                                    let now = Instant::now();
 
-                if let Some(tcp_packet) = TcpPacket::new(&packet[34..]) {
-                    if let Some(source_ip) = extract_ipv4_source(&packet) {
-                        let now = Instant::now();
+                                    // Retain only recent entries
+                                    ip_map.retain(|_, activity| {
+                                        now.duration_since(activity.first_seen) <= window_duration
+                                    });
 
-                        // Remove expired entries
-                        ip_map.retain(|_, activity| now.duration_since(activity.first_seen) <= window_duration);
+                                    let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
+                                        ports: HashSet::new(),
+                                        first_seen: now,
+                                    });
+                                    activity.ports.insert(tcp.get_destination());
 
-                        // Update or insert IP activity
-                        let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
-                            ports: HashSet::new(),
-                            first_seen: now,
-                        });
-                        activity.ports.insert(tcp_packet.get_destination());
-
-                        // Check threshold
-                        if activity.ports.len() >= args.threshold {
-                            let alert_msg = format!(
-                                "[{}] ⚠️  Potential port scan from {}: {} ports in {}s",
-                                Utc::now().format("%Y-%m-%d %H:%M:%S"),
-                                source_ip,
-                                activity.ports.len(),
-                                args.window
-                            );
-                            println!("{}", alert_msg);
-                            log_alert(&args.log_file, &alert_msg);
-                            ip_map.remove(&source_ip);
+                                    if activity.ports.len() >= args.threshold {
+                                        let alert_msg = format!(
+                                            "[{}] ⚠️  Potential port scan from {}: {} ports in {}s",
+                                            Utc::now().format("%Y-%m-%d %H:%M:%S"),
+                                            source_ip,
+                                            activity.ports.len(),
+                                            args.window
+                                        );
+                                        println!("{}", alert_msg);
+                                        log_alert(&args.log_file, &alert_msg);
+                                        ip_map.remove(&source_ip);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -141,7 +130,6 @@ fn main() {
             Err(e) => eprintln!("Failed to read packet: {}", e),
         }
 
-        // Heartbeat every 30 seconds
         if last_heartbeat.elapsed() >= Duration::from_secs(30) {
             println!(
                 "[{}] ✅ IDS still running...",
@@ -151,4 +139,3 @@ fn main() {
         }
     }
 }
-
