@@ -95,7 +95,7 @@ fn main() {
                             if let Some(ipv4) = Ipv4Packet::new(ipv4_payload) {
                                 if ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
                                     let ip_header_len = ipv4.get_header_length() as usize * 4;
-                                    if ipv4_payload.len() > ip_header_len {
+                                    if ipv4_payload.len() >= ip_header_len {
                                         let tcp_payload = &ipv4_payload[ip_header_len..];
                                         if tcp_payload.len() >= TcpPacket::minimum_packet_size() {
                                             if let Some(tcp) = TcpPacket::new(tcp_payload) {
@@ -104,16 +104,13 @@ fn main() {
 
                                                 // Remove stale entries
                                                 ip_map.retain(|_, activity| {
-                                                    now.duration_since(activity.first_seen)
-                                                        <= window_duration
+                                                    now.duration_since(activity.first_seen) <= window_duration
                                                 });
 
-                                                let activity = ip_map
-                                                    .entry(source_ip)
-                                                    .or_insert_with(|| IpActivity {
-                                                        ports: HashSet::new(),
-                                                        first_seen: now,
-                                                    });
+                                                let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
+                                                    ports: HashSet::new(),
+                                                    first_seen: now,
+                                                });
 
                                                 activity.ports.insert(tcp.get_destination());
 
