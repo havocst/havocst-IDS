@@ -1,6 +1,6 @@
 use clap::Parser;
 use chrono::Utc;
-use pnet::datalink::{self, Channel::Ethernet, NetworkInterface};
+use pnet::datalink::{self, Channel::Ethernet};
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use std::collections::{HashMap, HashSet};
@@ -48,6 +48,21 @@ fn log_alert(log_file: &Option<String>, alert: &str) {
     }
 }
 
+/// Extract IPv4 source address from raw Ethernet frame packet
+fn extract_ipv4_source(packet: &[u8]) -> Option<Ipv4Addr> {
+    // Ethernet header = 14 bytes, IP header usually 20 bytes
+    if packet.len() >= 34 {
+        let ip_header = &packet[14..34];
+        if ip_header[0] >> 4 == 4 {
+            Some(Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -88,7 +103,12 @@ fn main() {
     loop {
         match rx.next() {
             Ok(packet) => {
-                if let Some(tcp_packet) = TcpPacket::new(&packet[34..]) { // Skip Ethernet+IP header (approx)
+                if packet.len() < 34 {
+                    eprintln!("⚠️  Skipped short packet: only {} bytes", packet.len());
+                    continue;
+                }
+
+                if let Some(tcp_packet) = TcpPacket::new(&packet[34..]) {
                     if let Some(source_ip) = extract_ipv4_source(&packet) {
                         let now = Instant::now();
 
@@ -113,7 +133,6 @@ fn main() {
                             );
                             println!("{}", alert_msg);
                             log_alert(&args.log_file, &alert_msg);
-                            // Reset to avoid spam alerts for same IP
                             ip_map.remove(&source_ip);
                         }
                     }
@@ -132,22 +151,3 @@ fn main() {
         }
     }
 }
-
-/// Extract IPv4 source address from raw Ethernet frame packet
-fn extract_ipv4_source(packet: &[u8]) -> Option<Ipv4Addr> {
-    // Ethernet header: 14 bytes
-    // IPv4 header: typically 20 bytes, version 4
-    if packet.len() >= 34 {
-        // IPv4 header starts at offset 14
-        let ip_header = &packet[14..34];
-        if ip_header[0] >> 4 == 4 {
-            let src_ip = Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]);
-            Some(src_ip)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
