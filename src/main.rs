@@ -50,10 +50,10 @@ fn log_alert(log_file: &Option<String>, alert: &str) {
 
 /// Extract IPv4 source address from raw Ethernet frame packet
 fn extract_ipv4_source(packet: &[u8]) -> Option<Ipv4Addr> {
-    // Ethernet header = 14 bytes, IP header usually 20 bytes
+    // Check that packet has enough length to safely slice
     if packet.len() >= 34 {
         let ip_header = &packet[14..34];
-        if ip_header[0] >> 4 == 4 {
+        if ip_header.len() == 20 && (ip_header[0] >> 4) == 4 {
             Some(Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]))
         } else {
             None
@@ -151,3 +151,4 @@ fn main() {
         }
     }
 }
+
