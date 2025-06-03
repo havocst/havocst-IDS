@@ -94,35 +94,41 @@ fn main() {
                         if ipv4_payload.len() >= Ipv4Packet::minimum_packet_size() {
                             if let Some(ipv4) = Ipv4Packet::new(ipv4_payload) {
                                 if ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
-                                    let tcp_payload = ipv4.payload();
-                                    if tcp_payload.len() >= TcpPacket::minimum_packet_size() {
-                                        if let Some(tcp) = TcpPacket::new(tcp_payload) {
-                                            let source_ip = ipv4.get_source();
-                                            let now = Instant::now();
+                                    let ip_header_len = ipv4.get_header_length() as usize * 4;
+                                    if ipv4_payload.len() > ip_header_len {
+                                        let tcp_payload = &ipv4_payload[ip_header_len..];
+                                        if tcp_payload.len() >= TcpPacket::minimum_packet_size() {
+                                            if let Some(tcp) = TcpPacket::new(tcp_payload) {
+                                                let source_ip = ipv4.get_source();
+                                                let now = Instant::now();
 
-                                            // Remove stale entries
-                                            ip_map.retain(|_, activity| {
-                                                now.duration_since(activity.first_seen) <= window_duration
-                                            });
+                                                // Remove stale entries
+                                                ip_map.retain(|_, activity| {
+                                                    now.duration_since(activity.first_seen)
+                                                        <= window_duration
+                                                });
 
-                                            let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
-                                                ports: HashSet::new(),
-                                                first_seen: now,
-                                            });
+                                                let activity = ip_map
+                                                    .entry(source_ip)
+                                                    .or_insert_with(|| IpActivity {
+                                                        ports: HashSet::new(),
+                                                        first_seen: now,
+                                                    });
 
-                                            activity.ports.insert(tcp.get_destination());
+                                                activity.ports.insert(tcp.get_destination());
 
-                                            if activity.ports.len() >= args.threshold {
-                                                let alert_msg = format!(
-                                                    "[{}] ⚠️ Potential port scan from {}: {} ports in {}s",
-                                                    Utc::now().format("%Y-%m-%d %H:%M:%S"),
-                                                    source_ip,
-                                                    activity.ports.len(),
-                                                    args.window
-                                                );
-                                                println!("{}", alert_msg);
-                                                log_alert(&args.log_file, &alert_msg);
-                                                ip_map.remove(&source_ip);
+                                                if activity.ports.len() >= args.threshold {
+                                                    let alert_msg = format!(
+                                                        "[{}] ⚠️ Potential port scan from {}: {} ports in {}s",
+                                                        Utc::now().format("%Y-%m-%d %H:%M:%S"),
+                                                        source_ip,
+                                                        activity.ports.len(),
+                                                        args.window
+                                                    );
+                                                    println!("{}", alert_msg);
+                                                    log_alert(&args.log_file, &alert_msg);
+                                                    ip_map.remove(&source_ip);
+                                                }
                                             }
                                         }
                                     }
@@ -144,4 +150,3 @@ fn main() {
         }
     }
 }
-
