@@ -54,6 +54,9 @@ fn get_default_interface() -> Option<NetworkInterface> {
 }
 
 fn main() {
+    // Enable backtrace for better error debugging (optional)
+    std::env::set_var("RUST_BACKTRACE", "1");
+
     let args = Args::parse();
 
     let interface = get_default_interface().unwrap_or_else(|| {
@@ -92,31 +95,36 @@ fn main() {
                     if ethernet.get_ethertype() == pnet::packet::ethernet::EtherTypes::Ipv4 {
                         if let Some(ipv4) = Ipv4Packet::new(ethernet.payload()) {
                             if ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
-                                if let Some(tcp) = TcpPacket::new(ipv4.payload()) {
-                                    let source_ip = ipv4.get_source();
-                                    let now = Instant::now();
+                                // Defensive check: Only parse TCP packet if payload length is valid
+                                let ipv4_payload = ipv4.payload();
+                                if ipv4_payload.len() >= TcpPacket::minimum_packet_size() {
+                                    if let Some(tcp) = TcpPacket::new(ipv4_payload) {
+                                        let source_ip = ipv4.get_source();
+                                        let now = Instant::now();
 
-                                    ip_map.retain(|_, activity| {
-                                        now.duration_since(activity.first_seen) <= window_duration
-                                    });
+                                        // Remove old entries outside the window
+                                        ip_map.retain(|_, activity| {
+                                            now.duration_since(activity.first_seen) <= window_duration
+                                        });
 
-                                    let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
-                                        ports: HashSet::new(),
-                                        first_seen: now,
-                                    });
-                                    activity.ports.insert(tcp.get_destination());
+                                        let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
+                                            ports: HashSet::new(),
+                                            first_seen: now,
+                                        });
+                                        activity.ports.insert(tcp.get_destination());
 
-                                    if activity.ports.len() >= args.threshold {
-                                        let alert_msg = format!(
-                                            "[{}] ⚠️  Potential port scan from {}: {} ports in {}s",
-                                            Utc::now().format("%Y-%m-%d %H:%M:%S"),
-                                            source_ip,
-                                            activity.ports.len(),
-                                            args.window
-                                        );
-                                        println!("{}", alert_msg);
-                                        log_alert(&args.log_file, &alert_msg);
-                                        ip_map.remove(&source_ip);
+                                        if activity.ports.len() >= args.threshold {
+                                            let alert_msg = format!(
+                                                "[{}] ⚠️  Potential port scan from {}: {} ports in {}s",
+                                                Utc::now().format("%Y-%m-%d %H:%M:%S"),
+                                                source_ip,
+                                                activity.ports.len(),
+                                                args.window
+                                            );
+                                            println!("{}", alert_msg);
+                                            log_alert(&args.log_file, &alert_msg);
+                                            ip_map.remove(&source_ip);
+                                        }
                                     }
                                 }
                             }
@@ -136,4 +144,3 @@ fn main() {
         }
     }
 }
-
