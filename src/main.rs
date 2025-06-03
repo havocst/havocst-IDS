@@ -95,7 +95,8 @@ fn main() {
                             if let Some(ipv4) = Ipv4Packet::new(ipv4_payload) {
                                 if ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
                                     let ip_header_len = ipv4.get_header_length() as usize * 4;
-                                    if ipv4_payload.len() >= ip_header_len {
+
+                                    if ipv4_payload.len() > ip_header_len {
                                         let tcp_payload = &ipv4_payload[ip_header_len..];
                                         if tcp_payload.len() >= TcpPacket::minimum_packet_size() {
                                             if let Some(tcp) = TcpPacket::new(tcp_payload) {
