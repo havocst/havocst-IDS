@@ -69,10 +69,10 @@ fn main() {
         args.window
     );
 
-    let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
-        Ok(Ethernet(_tx, rx)) => (_tx, rx),
+    let mut rx = match datalink::channel(&interface, Default::default()) {
+        Ok(Ethernet(_, rx)) => rx,
         Ok(_) => {
-            eprintln!("❌ Unhandled channel type");
+            eprintln!("❌ Unsupported channel type.");
             std::process::exit(1);
         }
         Err(e) => {
@@ -100,6 +100,7 @@ fn main() {
                                             let source_ip = ipv4.get_source();
                                             let now = Instant::now();
 
+                                            // Remove stale entries
                                             ip_map.retain(|_, activity| {
                                                 now.duration_since(activity.first_seen) <= window_duration
                                             });
@@ -108,11 +109,12 @@ fn main() {
                                                 ports: HashSet::new(),
                                                 first_seen: now,
                                             });
+
                                             activity.ports.insert(tcp.get_destination());
 
                                             if activity.ports.len() >= args.threshold {
                                                 let alert_msg = format!(
-                                                    "[{}] ⚠️  Potential port scan from {}: {} ports in {}s",
+                                                    "[{}] ⚠️ Potential port scan from {}: {} ports in {}s",
                                                     Utc::now().format("%Y-%m-%d %H:%M:%S"),
                                                     source_ip,
                                                     activity.ports.len(),
@@ -123,8 +125,6 @@ fn main() {
                                                 ip_map.remove(&source_ip);
                                             }
                                         }
-                                    } else {
-                                        // TCP payload too short, skip
                                     }
                                 }
                             }
