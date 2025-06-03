@@ -103,11 +103,15 @@ fn main() {
                                         now.duration_since(activity.first_seen) <= window_duration
                                     });
 
-                                    let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
-                                        ports: HashSet::new(),
-                                        first_seen: now,
-                                    });
-                                    activity.ports.insert(tcp.get_destination());
+                                    let dest_port = tcp.get_destination();
+
+                                    let activity = ip_map
+                                        .entry(source_ip)
+                                        .or_insert_with(|| IpActivity {
+                                            ports: HashSet::new(),
+                                            first_seen: now,
+                                        });
+                                    activity.ports.insert(dest_port);
 
                                     if activity.ports.len() >= args.threshold {
                                         let alert_msg = format!(
@@ -121,6 +125,11 @@ fn main() {
                                         log_alert(&args.log_file, &alert_msg);
                                         ip_map.remove(&source_ip);
                                     }
+                                } else {
+                                    eprintln!(
+                                        "[{}] Skipping malformed TCP packet (invalid length)",
+                                        Utc::now().format("%Y-%m-%d %H:%M:%S")
+                                    );
                                 }
                             }
                         }
