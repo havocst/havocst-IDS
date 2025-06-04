@@ -10,6 +10,11 @@ use clap::Parser;
 use pnet::datalink::{self, Channel::Ethernet, Config};
 use pnet::packet::{ethernet::EthernetPacket, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, tcp::TcpPacket, Packet};
 
+// Rodio-related imports for sound playback
+use std::fs::File;
+use std::io::BufReader;
+use rodio::{Decoder, OutputStream, Sink};
+
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
@@ -41,6 +46,21 @@ fn log_alert(path: &str, message: &str) {
     }
 }
 
+/// Plays an alert sound from 'alert.wav' in the root directory asynchronously.
+/// This function will not block the main detection loop.
+fn play_alert_sound() {
+    if let Ok((_stream, stream_handle)) = OutputStream::try_default() {
+        if let Ok(file) = File::open("alert.wav") {
+            if let Ok(source) = Decoder::new(BufReader::new(file)) {
+                if let Ok(sink) = Sink::try_new(&stream_handle) {
+                    sink.append(source);
+                    sink.detach(); // Play asynchronously, do not block
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -65,7 +85,7 @@ fn main() {
     config.read_timeout = Some(Duration::from_millis(1000));
 
     let (_, mut rx) = match datalink::channel(&interface, config) {
-        Ok(Ethernet(tx, rx)) => (tx, rx),
+        Ok(Ethernet(_tx, rx)) => (_tx, rx),
         Ok(_) => {
             eprintln!("❌ Unsupported channel type");
             process::exit(1);
@@ -114,6 +134,7 @@ fn main() {
                                             let source_ip = ipv4.get_source();
                                             let now = Instant::now();
 
+                                            // Remove expired activity entries
                                             ip_map.retain(|_, activity| {
                                                 now.duration_since(activity.first_seen) <= window_duration
                                             });
@@ -135,6 +156,7 @@ fn main() {
                                                 );
                                                 println!("{}", alert_msg);
                                                 log_alert(&args.log_file, &alert_msg);
+                                                play_alert_sound(); // Play the .wav alert sound asynchronously
                                                 ip_map.remove(&source_ip);
                                             }
                                         }
@@ -163,4 +185,3 @@ fn main() {
         }
     }
 }
-
