@@ -1,12 +1,12 @@
 [package]
-name = "rust-IDS"
+name = "rust-ids"
 version = "0.1.0"
 edition = "2021"
 authors = ["havocst"]
 description = "A lightweight, CLI-based Intrusion Detection System (IDS) written in Rust for monitoring and detecting potential port scan attacks."
 license = "MIT"
-repository = "https://github.com/havocst/havocst-IDS"
-homepage = "https://github.com/havocst/havocst-IDS"
+repository = "https://github.com/havocst/havocst-ids"
+homepage = "https://github.com/havocst/havocst-ids"
 keywords = ["rust", "ids", "security", "network", "portscan", "IDS", "port", "scan" , "detector" ]
 categories = ["command-line-utilities", "network-programming", "security"]
 

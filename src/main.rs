@@ -45,7 +45,7 @@ fn main() {
     let args = Args::parse();
 
     println!(
-        "[{}] Starting rust-IDS on interface '{}' with threshold={} ports, window={}s",
+        "[{}] Starting rust-ids on interface '{}' with threshold={} ports, window={}s",
         Utc::now().format("%Y-%m-%d %H:%M:%S"),
         args.iface,
         args.threshold,

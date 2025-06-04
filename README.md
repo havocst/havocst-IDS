@@ -1,6 +1,6 @@
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-# rust-IDS 🛡️
+# rust-ids 🛡️
 
 A simple network intrusion detection system (IDS) written in Rust that monitors unusual port scanning behavior on a specified network interface.
 
@@ -22,8 +22,8 @@ A simple network intrusion detection system (IDS) written in Rust that monitors 
 Clone the repo and build in release mode for better performance:
 
 ```bash
-git clone https://github.com/havocst/rust-IDS.git
-cd rust-IDS
+git clone https://github.com/havocst/rust-ids.git
+cd rust-ids
 cargo build --release
 ```
 
@@ -45,7 +45,7 @@ Replace `wlo1` with your network interface name. Adjust `threshold` (number of p
 
 ## Granting Network Permissions 🔐
 
-Because `rust-IDS` needs to capture raw packets, it requires special permissions. The recommended way is:
+Because `rust-ids` needs to capture raw packets, it requires special permissions. The recommended way is:
 
 ```bash
 sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/rust-ids
@@ -93,7 +93,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ---
 
-Thank you for using rust-IDS! Stay safe and secure! 🔒✨
+Thank you for using rust-ids! Stay safe and secure! 🔒✨
 
 
 
