@@ -4,7 +4,8 @@
 
 A simple network intrusion detection system (IDS) written in Rust that monitors unusual port scanning behavior on a specified network interface.
 
-🚨**Note: All timestamps in logs and output are in UTC ⏰
+🚨🚨🚨
+***Note: All timestamps in logs and output are in UTC ⏰
 Adjust accordingly for your local timezone (e.g., CST = UTC−5 during Daylight Saving Time).
 
 ## Features 🚀
