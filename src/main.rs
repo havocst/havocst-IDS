@@ -1,32 +1,33 @@
-use clap::Parser;
-use chrono::Utc;
-use pnet::datalink::{self, Channel::Ethernet, NetworkInterface};
-use pnet::packet::ethernet::EthernetPacket;
-use pnet::packet::ip::IpNextHeaderProtocols;
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::tcp::TcpPacket;
-use pnet::packet::Packet;
 use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::Ipv4Addr;
+use std::process;
 use std::time::{Duration, Instant};
 
-/// Simple Rust IDS to detect TCP port scans.
+use chrono::Utc;
+use clap::Parser;
+use pnet::datalink::{self, Channel::Ethernet, Config};
+use pnet::packet::{ethernet::EthernetPacket, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, tcp::TcpPacket, Packet};
+
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about)]
 struct Args {
-    /// Number of unique ports scanned within window to trigger alert
-    #[arg(short, long, default_value_t = 20)]
+    /// Network interface to monitor
+    #[arg(short, long)]
+    iface: String,
+
+    /// Number of unique ports to trigger alert
+    #[arg(short, long, default_value_t = 25)]
     threshold: usize,
 
-    /// Time window in seconds to count unique ports
+    /// Time window in seconds
     #[arg(short, long, default_value_t = 60)]
     window: u64,
 
-    /// Optional file path to log alerts
-    #[arg(short, long)]
-    log_file: Option<String>,
+    /// File to log alerts
+    #[arg(short, long, default_value = "alerts.log")]
+    log_file: String,
 }
 
 struct IpActivity {
@@ -34,50 +35,44 @@ struct IpActivity {
     first_seen: Instant,
 }
 
-fn log_alert(log_file: &Option<String>, alert: &str) {
-    if let Some(path) = log_file {
-        match OpenOptions::new().append(true).create(true).open(path) {
-            Ok(mut file) => {
-                if let Err(e) = writeln!(file, "{}", alert) {
-                    eprintln!("Failed to write to log file: {}", e);
-                }
-            }
-            Err(e) => eprintln!("Failed to open log file '{}': {}", path, e),
-        }
+fn log_alert(path: &str, message: &str) {
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{}", message);
     }
-}
-
-fn get_default_interface() -> Option<NetworkInterface> {
-    datalink::interfaces()
-        .into_iter()
-        .find(|iface| iface.is_up() && !iface.is_loopback() && !iface.ips.is_empty())
 }
 
 fn main() {
     let args = Args::parse();
 
-    let interface = get_default_interface().unwrap_or_else(|| {
-        eprintln!("❌ No suitable network interface found (up, non-loopback, has IPs).");
-        std::process::exit(1);
-    });
-
     println!(
-        "[{}] ✅ Starting rust-IDS on interface '{}' with threshold={} ports, window={}s",
+        "[{}] Starting rust-IDS on interface '{}' with threshold={} ports, window={}s",
         Utc::now().format("%Y-%m-%d %H:%M:%S"),
-        interface.name,
+        args.iface,
         args.threshold,
         args.window
     );
 
-    let mut rx = match datalink::channel(&interface, Default::default()) {
-        Ok(Ethernet(_, rx)) => rx,
+    let interfaces = datalink::interfaces();
+    let interface = interfaces
+        .into_iter()
+        .find(|iface| iface.name == args.iface)
+        .unwrap_or_else(|| {
+            eprintln!("❌ Interface '{}' not found", args.iface);
+            process::exit(1);
+        });
+
+    let mut config = Config::default();
+    config.read_timeout = Some(Duration::from_millis(1000));
+
+    let (_, mut rx) = match datalink::channel(&interface, config) {
+        Ok(Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => {
-            eprintln!("❌ Unsupported channel type.");
-            std::process::exit(1);
+            eprintln!("❌ Unsupported channel type");
+            process::exit(1);
         }
         Err(e) => {
             eprintln!("❌ Failed to create datalink channel: {}", e);
-            std::process::exit(1);
+            process::exit(1);
         }
     };
 
@@ -95,39 +90,56 @@ fn main() {
                             if let Some(ipv4) = Ipv4Packet::new(ipv4_payload) {
                                 if ipv4.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
                                     let ip_header_len = ipv4.get_header_length() as usize * 4;
+                                    if ipv4_payload.len() < ip_header_len {
+                                        eprintln!(
+                                            "⚠️ IPv4 payload too short: {} bytes, expected at least {} bytes",
+                                            ipv4_payload.len(),
+                                            ip_header_len
+                                        );
+                                        continue;
+                                    }
 
-                                    if ipv4_payload.len() > ip_header_len {
-                                        let tcp_payload = &ipv4_payload[ip_header_len..];
-                                        if tcp_payload.len() >= TcpPacket::minimum_packet_size() {
-                                            if let Some(tcp) = TcpPacket::new(tcp_payload) {
-                                                let source_ip = ipv4.get_source();
-                                                let now = Instant::now();
+                                    let tcp_payload = &ipv4_payload[ip_header_len..];
+                                    if tcp_payload.len() < TcpPacket::minimum_packet_size() {
+                                        eprintln!(
+                                            "⚠️ TCP payload too short: {} bytes, expected at least {} bytes",
+                                            tcp_payload.len(),
+                                            TcpPacket::minimum_packet_size()
+                                        );
+                                        continue;
+                                    }
 
-                                                // Remove stale entries
-                                                ip_map.retain(|_, activity| {
-                                                    now.duration_since(activity.first_seen) <= window_duration
-                                                });
+                                    match TcpPacket::new(tcp_payload) {
+                                        Some(tcp) => {
+                                            let source_ip = ipv4.get_source();
+                                            let now = Instant::now();
 
-                                                let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
-                                                    ports: HashSet::new(),
-                                                    first_seen: now,
-                                                });
+                                            ip_map.retain(|_, activity| {
+                                                now.duration_since(activity.first_seen) <= window_duration
+                                            });
 
-                                                activity.ports.insert(tcp.get_destination());
+                                            let activity = ip_map.entry(source_ip).or_insert_with(|| IpActivity {
+                                                ports: HashSet::new(),
+                                                first_seen: now,
+                                            });
 
-                                                if activity.ports.len() >= args.threshold {
-                                                    let alert_msg = format!(
-                                                        "[{}] ⚠️ Potential port scan from {}: {} ports in {}s",
-                                                        Utc::now().format("%Y-%m-%d %H:%M:%S"),
-                                                        source_ip,
-                                                        activity.ports.len(),
-                                                        args.window
-                                                    );
-                                                    println!("{}", alert_msg);
-                                                    log_alert(&args.log_file, &alert_msg);
-                                                    ip_map.remove(&source_ip);
-                                                }
+                                            activity.ports.insert(tcp.get_destination());
+
+                                            if activity.ports.len() >= args.threshold {
+                                                let alert_msg = format!(
+                                                    "[{}] ⚠️ Potential port scan from {}: {} ports in {}s",
+                                                    Utc::now().format("%Y-%m-%d %H:%M:%S"),
+                                                    source_ip,
+                                                    activity.ports.len(),
+                                                    args.window
+                                                );
+                                                println!("{}", alert_msg);
+                                                log_alert(&args.log_file, &alert_msg);
+                                                ip_map.remove(&source_ip);
                                             }
+                                        }
+                                        None => {
+                                            eprintln!("⚠️ Failed to parse TCP packet.");
                                         }
                                     }
                                 }
@@ -135,16 +147,20 @@ fn main() {
                         }
                     }
                 }
-            }
-            Err(e) => eprintln!("❌ Failed to read packet: {}", e),
-        }
 
-        if last_heartbeat.elapsed() >= Duration::from_secs(30) {
-            println!(
-                "[{}] ✅ IDS still running...",
-                Utc::now().format("%Y-%m-%d %H:%M:%S")
-            );
-            last_heartbeat = Instant::now();
+                if last_heartbeat.elapsed() >= Duration::from_secs(30) {
+                    println!("[{}] ✅ IDS still running...", Utc::now().format("%Y-%m-%d %H:%M:%S"));
+                    last_heartbeat = Instant::now();
+                }
+            }
+            Err(_) => {
+                // Timeout occurred, check for heartbeat
+                if last_heartbeat.elapsed() >= Duration::from_secs(30) {
+                    println!("[{}] ✅ IDS still running...", Utc::now().format("%Y-%m-%d %H:%M:%S"));
+                    last_heartbeat = Instant::now();
+                }
+            }
         }
     }
 }
+
