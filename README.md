@@ -4,7 +4,7 @@
 
 A simple network intrusion detection system (IDS) written in Rust that monitors unusual port scanning behavior on a specified network interface.
 
-***Note: All timestamps in logs and output are in UTC ⏰
+***Note: All timestamps in logs and output are in UTC ⏰  
 Adjust accordingly for your local timezone (e.g., CST = UTC−5 during Daylight Saving Time).
 
 ## Features 🚀
@@ -36,13 +36,22 @@ Grant the binary the necessary network permissions (so you don't need to run it 
 sudo setcap cap_net_raw,cap_net_admin=eip ./target/release/rust-ids
 ```
 
-Run the IDS:
+---
 
+## Running the IDS 🚦
+
+### Basic usage (uses defaults)
+```bash
+./target/release/rust-ids --iface wlo1
+```
+- Uses defaults: `threshold=20`, `window=60`, `log-file=alerts.log`
+- Replace `wlo1` with your network interface name.
+
+### Advanced usage (custom threshold, window, and log file)
 ```bash
 ./target/release/rust-ids --iface wlo1 --threshold 25 --window 60 --log-file alerts.log
 ```
-
-Replace `wlo1` with your network interface name. Adjust `threshold` (number of ports) and `window` (seconds) as needed.
+- Customize detection threshold, window, and log file as needed.
 
 ---
 
@@ -97,6 +106,3 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ---
 
 Thank you for using rust-ids! Stay safe and secure! 🔒✨
-
-
-

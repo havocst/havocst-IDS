@@ -18,7 +18,7 @@ struct Args {
     iface: String,
 
     /// Number of unique ports to trigger alert
-    #[arg(short, long, default_value_t = 25)]
+    #[arg(short, long, default_value_t = 20)]
     threshold: usize,
 
     /// Time window in seconds
@@ -65,7 +65,7 @@ fn main() {
     config.read_timeout = Some(Duration::from_millis(1000));
 
     let (_, mut rx) = match datalink::channel(&interface, config) {
-        Ok(Ethernet(tx, rx)) => (tx, rx),
+        Ok(Ethernet(_tx, rx)) => ((), rx),
         Ok(_) => {
             eprintln!("❌ Unsupported channel type");
             process::exit(1);
@@ -112,6 +112,7 @@ fn main() {
                                     match TcpPacket::new(tcp_payload) {
                                         Some(tcp) => {
                                             let source_ip = ipv4.get_source();
+                                            let dst_port = tcp.get_destination();
                                             let now = Instant::now();
 
                                             ip_map.retain(|_, activity| {
@@ -123,7 +124,7 @@ fn main() {
                                                 first_seen: now,
                                             });
 
-                                            activity.ports.insert(tcp.get_destination());
+                                            activity.ports.insert(dst_port);
 
                                             if activity.ports.len() >= args.threshold {
                                                 let alert_msg = format!(
@@ -148,6 +149,7 @@ fn main() {
                     }
                 }
 
+                // Heartbeat every 30 seconds
                 if last_heartbeat.elapsed() >= Duration::from_secs(30) {
                     println!("[{}] ✅ IDS still running...", Utc::now().format("%Y-%m-%d %H:%M:%S"));
                     last_heartbeat = Instant::now();
@@ -163,4 +165,3 @@ fn main() {
         }
     }
 }
-
