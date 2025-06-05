@@ -10,15 +10,6 @@ use clap::Parser;
 use pnet::datalink::{self, Channel::Ethernet, Config};
 use pnet::packet::{ethernet::EthernetPacket, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, tcp::TcpPacket, Packet};
 
-// Rodio-related imports for sound playback
-use std::fs::File;
-use std::io::BufReader;
-use rodio::{Decoder, OutputStream, Sink};
-
-// For alert rate-limiting
-use std::sync::Mutex;
-use once_cell::sync::Lazy;
-
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
@@ -50,28 +41,6 @@ fn log_alert(path: &str, message: &str) {
     }
 }
 
-// Static for rate-limiting the alert sound to once every 15 seconds
-static LAST_ALERT: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Instant::now() - Duration::from_secs(15)));
-
-/// Plays an alert sound from 'alert.wav' in the root directory asynchronously,
-/// but only if at least 15 seconds have passed since the last alert.
-fn maybe_play_alert_sound() {
-    let mut last = LAST_ALERT.lock().unwrap();
-    if last.elapsed() > Duration::from_secs(15) {
-        if let Ok((_stream, stream_handle)) = OutputStream::try_default() {
-            if let Ok(file) = File::open("alert.wav") {
-                if let Ok(source) = Decoder::new(BufReader::new(file)) {
-                    if let Ok(sink) = Sink::try_new(&stream_handle) {
-                        sink.append(source);
-                        sink.detach(); // Play asynchronously, do not block
-                    }
-                }
-            }
-        }
-        *last = Instant::now();
-    }
-}
-
 fn main() {
     let args = Args::parse();
 
@@ -96,7 +65,7 @@ fn main() {
     config.read_timeout = Some(Duration::from_millis(1000));
 
     let (_, mut rx) = match datalink::channel(&interface, config) {
-        Ok(Ethernet(_tx, rx)) => (_tx, rx),
+        Ok(Ethernet(tx, rx)) => (tx, rx),
         Ok(_) => {
             eprintln!("❌ Unsupported channel type");
             process::exit(1);
@@ -145,7 +114,6 @@ fn main() {
                                             let source_ip = ipv4.get_source();
                                             let now = Instant::now();
 
-                                            // Remove expired activity entries
                                             ip_map.retain(|_, activity| {
                                                 now.duration_since(activity.first_seen) <= window_duration
                                             });
@@ -167,7 +135,6 @@ fn main() {
                                                 );
                                                 println!("{}", alert_msg);
                                                 log_alert(&args.log_file, &alert_msg);
-                                                maybe_play_alert_sound(); // Play the .wav alert sound asynchronously (rate-limited)
                                                 ip_map.remove(&source_ip);
                                             }
                                         }
@@ -196,3 +163,4 @@ fn main() {
         }
     }
 }
+
