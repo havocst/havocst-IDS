@@ -115,7 +115,7 @@ fn main() {
         match rx.next() {
             Ok(packet_data) => {
                 if let Some(ethernet) = EthernetPacket::new(packet_data) {
-                    if ethernet.get_ethertype() == pnet::packet::etherTypes::Ipv4 {
+                    if ethernet.get_ethertype() == pnet::packet::ethernet::EtherTypes::Ipv4 {
                         let ipv4_payload = ethernet.payload();
                         if ipv4_payload.len() >= Ipv4Packet::minimum_packet_size() {
                             if let Some(ipv4) = Ipv4Packet::new(ipv4_payload) {
