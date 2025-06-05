@@ -15,6 +15,10 @@ use std::fs::File;
 use std::io::BufReader;
 use rodio::{Decoder, OutputStream, Sink};
 
+// For alert rate-limiting
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
@@ -46,18 +50,25 @@ fn log_alert(path: &str, message: &str) {
     }
 }
 
-/// Plays an alert sound from 'alert.wav' in the root directory asynchronously.
-/// This function will not block the main detection loop.
-fn play_alert_sound() {
-    if let Ok((_stream, stream_handle)) = OutputStream::try_default() {
-        if let Ok(file) = File::open("alert.wav") {
-            if let Ok(source) = Decoder::new(BufReader::new(file)) {
-                if let Ok(sink) = Sink::try_new(&stream_handle) {
-                    sink.append(source);
-                    sink.detach(); // Play asynchronously, do not block
+// Static for rate-limiting the alert sound to once every 15 seconds
+static LAST_ALERT: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Instant::now() - Duration::from_secs(15)));
+
+/// Plays an alert sound from 'alert.wav' in the root directory asynchronously,
+/// but only if at least 15 seconds have passed since the last alert.
+fn maybe_play_alert_sound() {
+    let mut last = LAST_ALERT.lock().unwrap();
+    if last.elapsed() > Duration::from_secs(15) {
+        if let Ok((_stream, stream_handle)) = OutputStream::try_default() {
+            if let Ok(file) = File::open("alert.wav") {
+                if let Ok(source) = Decoder::new(BufReader::new(file)) {
+                    if let Ok(sink) = Sink::try_new(&stream_handle) {
+                        sink.append(source);
+                        sink.detach(); // Play asynchronously, do not block
+                    }
                 }
             }
         }
+        *last = Instant::now();
     }
 }
 
@@ -104,7 +115,7 @@ fn main() {
         match rx.next() {
             Ok(packet_data) => {
                 if let Some(ethernet) = EthernetPacket::new(packet_data) {
-                    if ethernet.get_ethertype() == pnet::packet::ethernet::EtherTypes::Ipv4 {
+                    if ethernet.get_ethertype() == pnet::packet::etherTypes::Ipv4 {
                         let ipv4_payload = ethernet.payload();
                         if ipv4_payload.len() >= Ipv4Packet::minimum_packet_size() {
                             if let Some(ipv4) = Ipv4Packet::new(ipv4_payload) {
@@ -156,7 +167,7 @@ fn main() {
                                                 );
                                                 println!("{}", alert_msg);
                                                 log_alert(&args.log_file, &alert_msg);
-                                                play_alert_sound(); // Play the .wav alert sound asynchronously
+                                                maybe_play_alert_sound(); // Play the .wav alert sound asynchronously (rate-limited)
                                                 ip_map.remove(&source_ip);
                                             }
                                         }
